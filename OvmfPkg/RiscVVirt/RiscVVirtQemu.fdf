@@ -182,6 +182,7 @@ INF  OvmfPkg/PlatformHasAcpiDtDxe/PlatformHasAcpiDtDxe.inf
 INF  MdeModulePkg/Universal/Acpi/AcpiTableDxe/AcpiTableDxe.inf
 INF  MdeModulePkg/Universal/Acpi/BootGraphicsResourceTableDxe/BootGraphicsResourceTableDxe.inf
 INF  MdeModulePkg/Universal/Acpi/AcpiHardwareErrorTableDxe/HardwareErrorSourceTableDxe.inf
+INF  MdeModulePkg/Universal/Acpi/AcpiErrorInjectionTableDxe/ErrorInjectionTableDxe.inf
 INF  OvmfPkg/AcpiPlatformDxe/AcpiPlatformDxe.inf
 
 #
