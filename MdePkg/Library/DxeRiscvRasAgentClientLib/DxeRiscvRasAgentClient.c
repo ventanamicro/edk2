@@ -36,8 +36,14 @@
 #define RAS_GET_NUM_ERR_SRCS            0x1
 #define RAS_GET_ERR_SRCS_ID_LIST        0x2
 #define RAS_GET_ERR_SRC_DESC            0x3
+#define RAS_EINJ_GET_NUM_INSTRUCTIONS   0x4
+#define RAS_EINJ_GET_INSTRUCTION        0x5
+#define RAS_EINJ_EXECUTE_OPERATION      0x6
+#define RAS_EINJ_TRIGGER_ERROR          0x7
 
 #define __packed32 __attribute__((packed,aligned(__alignof__(UINT32))))
+
+int RacInitialized = 0;
 
 typedef struct __packed32 {
   UINT32 status;
@@ -206,11 +212,18 @@ RacInit (
   VOID
   )
 {
-  if (GetRasAgentMpxyChannelId (&gMpxyChannelId) != EFI_SUCCESS)
-    return EFI_NOT_READY;
+  if (RacInitialized == 0) {
+    if (GetRasAgentMpxyChannelId (&gMpxyChannelId) != EFI_SUCCESS)
+      return EFI_NOT_READY;
 
-  if (SbiMpxyChannelOpen (gMpxyChannelId) != EFI_SUCCESS)
-    return EFI_NOT_READY;
+    if (SbiMpxyChannelOpen (gMpxyChannelId) != EFI_SUCCESS)
+      return EFI_NOT_READY;
+
+    DEBUG((DEBUG_ERROR, "Rac Init Done\n"));
+    RacInitialized = 1;
+  } else {
+	  DEBUG((DEBUG_ERROR, "Rac already initilized: MpxyChannel: %u\n", gMpxyChannelId));
+  }
 
   return EFI_SUCCESS;
 }
@@ -327,6 +340,82 @@ RacGetErrorSourceDescriptor(
 
   *ErrorDescriptor = (VOID *)desc;
   *ErrorDescriptorSize = RspHdr->returned;
+
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS
+EFIAPI
+RacGetNumberErrorInjectionEntries(
+  UINT32 *NumInstructionEntries
+  )
+{
+  struct __packed32 _NumInst {
+    RasRpmiRespHeader RespHdr;
+    UINT32 NumInstructions;
+  } RasMsgBuf;
+
+  EFI_STATUS Status;
+  RasRpmiRespHeader *RespHdr = &RasMsgBuf.RespHdr;
+  UINTN RespLen = sizeof(RasMsgBuf);
+
+  ZeroMem (&RasMsgBuf, sizeof(RasMsgBuf));
+
+  Status = SbiMpxySendMessage (gMpxyChannelId,
+             RAS_EINJ_GET_NUM_INSTRUCTIONS,
+             &RasMsgBuf,
+             sizeof(UINT32),
+             (VOID *)&RasMsgBuf,
+             &RespLen
+             );
+  if (Status != EFI_SUCCESS) {
+    return Status;
+  }
+
+  if (RespHdr->status != 0) {
+    return EFI_DEVICE_ERROR;
+  }
+
+  *NumInstructionEntries = RasMsgBuf.NumInstructions;
+
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS
+EFIAPI
+RacGetEinjInstruction(
+  IN UINT32 EinjInstructionIndex,
+  OUT VOID **EinjInstruction,
+  OUT UINT32 *EinjInstructionSize
+  )
+{
+  UINTN RespLen = sizeof(gErrDescResp);
+  EFI_STATUS Status;
+  RasRpmiRespHeader *RspHdr = &gErrDescResp.RspHdr;
+  UINT8 *Instruction = &gErrDescResp.desc[0];
+  UINT32 *IID= (UINT32 *)&gErrDescResp.desc[0];
+
+  ZeroMem(&gErrDescResp, sizeof(gErrDescResp));
+
+  *IID = EinjInstructionIndex;
+  Status = SbiMpxySendMessage(gMpxyChannelId,
+             RAS_EINJ_GET_INSTRUCTION,
+             &gErrDescResp,
+             sizeof(gErrDescResp),
+             &gErrDescResp,
+             &RespLen);
+
+  if (Status != EFI_SUCCESS)
+    return Status;
+
+  if (RspHdr->status != 0)
+    return EFI_DEVICE_ERROR;
+
+  if (RspHdr->remaining != 0)
+    return EFI_DEVICE_ERROR;
+
+  *EinjInstruction = (VOID *)Instruction;
+  *EinjInstructionSize = RspHdr->returned;
 
   return EFI_SUCCESS;
 }
