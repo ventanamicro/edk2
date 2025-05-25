@@ -79,4 +79,38 @@ RacGetErrorSourceDescriptor(
   OUT UINT32 *ErrorDescriptorSize
   );
 
+/**
+  Get the number of hardware error injection instructions
+
+  @param NumInstructionEntries Pointer to which number of available instructions
+             are written
+
+  @retval EFI_SUCCESS  On success.
+**/
+EFI_STATUS
+EFIAPI
+RacGetNumberErrorInjectionEntries(
+  UINT32 *NumInstructionEntries
+  );
+
+/**
+  Get an error injection entry
+
+  @param EinjInstructionIndex Index of the instruction to be fetched. The index runs
+         from 0 to RacGetNumberErrorInjectionEntries()-1.
+  @param EinjInstruction Pointer to the instruction is returned in this pointer-to-pointer.
+         The returned pointer is owned by the callee and should not be freed.
+  @param EinjInstructionSize The size of the instruction returned in EinjInstruction
+
+  @retval EFI_SUCCESS  On success.
+**/
+
+EFI_STATUS
+EFIAPI
+RacGetEinjInstruction(
+  IN UINT32 EinjInstructionIndex,
+  OUT VOID **EinjInstruction,
+  OUT UINT32 *EinjInstructionSize
+  );
+
 #endif
