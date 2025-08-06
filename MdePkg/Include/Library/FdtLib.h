@@ -898,6 +898,33 @@ FdtNodeDepth (
   );
 
 /**
+  Check a node's compatible property
+
+  @param[in] Fdt            The pointer to FDT blob.
+  @param[in] NodeOffset     Offset of a tree node.
+  @param[in] Compatible     The string to match against.
+
+  @retval
+    0, if the node has a 'compatible' property listing the given string
+    1, if the node has a 'compatible' property, but it does not list
+       the given string
+    -FDT_ERR_NOTFOUND, if the given node has no 'compatible' property
+    -FDT_ERR_BADOFFSET, if nodeoffset does not refer to a BEGIN_NODE tag
+    -FDT_ERR_BADMAGIC,
+    -FDT_ERR_BADVERSION,
+    -FDT_ERR_BADSTATE,
+    -FDT_ERR_BADSTRUCTURE, standard meanings
+**/
+
+INT32
+EFIAPI
+FdtNodeCheckCompatible (
+  IN CONST VOID   *Fdt,
+  IN INT32        StartOffset,
+  IN CONST CHAR8  *Compatible
+  );
+
+/**
   Find nodes with a given 'compatible' value.
 
   @param[in] Fdt            The pointer to FDT blob.
