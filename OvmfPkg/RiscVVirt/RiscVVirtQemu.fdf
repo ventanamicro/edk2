@@ -80,15 +80,20 @@ INF  UefiCpuPkg/CpuDxeRiscV64/CpuDxeRiscV64.inf
 INF  MdeModulePkg/Core/RuntimeDxe/RuntimeDxe.inf
 INF  MdeModulePkg/Universal/SecurityStubDxe/SecurityStubDxe.inf
 INF  MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
-INF  MdeModulePkg/Universal/FaultTolerantWriteDxe/FaultTolerantWriteDxe.inf
 !if $(QEMU_PV_VARS) == TRUE
   INF OvmfPkg/VirtMmCommunicationDxe/VirtMmCommunication.inf
   INF MdeModulePkg/Universal/Variable/RuntimeDxe/VariableSmmRuntimeDxe.inf
-!else
-  INF  MdeModulePkg/Universal/Variable/RuntimeDxe/VariableRuntimeDxe.inf
 !endif
-!if $(SECURE_BOOT_ENABLE) == TRUE
-  INF  SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfigDxe.inf
+#
+# Variable services
+#
+!if $(SECURE_BOOT_ENABLE) == FALSE
+  INF MdeModulePkg/Universal/FaultTolerantWriteDxe/FaultTolerantWriteDxe.inf
+  INF MdeModulePkg/Universal/Variable/RuntimeDxe/VariableRuntimeDxe.inf
+!else
+  INF OvmfPkg/RiscVVirt/MmCommunicationDxe/MmCommunication.inf
+  INF MdeModulePkg/Universal/Variable/RuntimeDxe/VariableSmmRuntimeDxe.inf
+  INF SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfigDxe.inf
   INF  OvmfPkg/RiscVVirt/Feature/SecureBoot/SecureBootDefaultKeysInit/SecureBootDefaultKeysInit.inf
 
   FILE FREEFORM = 85254ea7-4759-4fc4-82d4-5eed5fb0a4a0 {
@@ -108,6 +113,7 @@ INF  MdeModulePkg/Universal/FaultTolerantWriteDxe/FaultTolerantWriteDxe.inf
     SECTION RAW = OvmfPkg/RiscVVirt/Feature/SecureBoot/SecureBootKeys/dbx/dbxupdate_x64.bin
   }
 !endif
+
 INF  MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
 INF  MdeModulePkg/Universal/ResetSystemRuntimeDxe/ResetSystemRuntimeDxe.inf
 INF  EmbeddedPkg/RealTimeClockRuntimeDxe/RealTimeClockRuntimeDxe.inf
