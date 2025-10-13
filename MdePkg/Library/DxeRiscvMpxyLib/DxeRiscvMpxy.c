@@ -12,6 +12,7 @@
 #include <Library/BaseMemoryLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
+#include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/DebugLib.h>
 #include <Library/PcdLib.h>
 #include <Library/SafeIntLib.h>
@@ -38,6 +39,36 @@ STATIC UINT64 gShmemSize = 0;
 STATIC UINT64 gShmemSet = 0;
 STATIC BOOLEAN gMpxyLibInitialized = FALSE;
 STATIC UINTN gShmemRefCount = 0;
+///
+/// Set Virtual Address Map Event
+///
+STATIC EFI_EVENT  mDxeRiscVMpxyLibVirtualNotifyEvent = NULL;
+
+/**
+  Convert the physical channel shared memory address.
+
+  @param[in]    Event   The event that is being processed.
+  @param[in]    Context The Event Context.
+**/
+VOID
+EFIAPI
+DxeRiscVMpxyLibVirtualNotify (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
+  )
+{
+  //
+  // If there have been no runtime registrations, then just return
+  //
+  if (gShmemVirt == NULL) {
+    return;
+  }
+
+  //
+  // Convert the channel memory which is of type  EfiRuntimeServicesData to a virtual address.
+  //
+  gRT->ConvertPointer (0, (VOID **)&gShmemVirt);
+}
 
 STATIC
 EFI_STATUS
@@ -318,9 +349,9 @@ SbiMpxyChannelOpen(
   if (SbiMpxyShmemIsSet()) {
     /* Does this channel needs bigger shared memory? */
     if (ChanDataLen > gShmemSize) {
-      SbiShmem = AllocateAlignedPages (NrEfiPages,
-                   EFI_PAGE_SIZE // Align
-                   );
+      SbiShmem = AllocateAlignedRuntimePages (NrEfiPages,
+                 EFI_PAGE_SIZE // Align
+                 );
 
       if (SbiShmem == NULL) {
         return (EFI_OUT_OF_RESOURCES);
@@ -347,7 +378,7 @@ SbiMpxyChannelOpen(
     }
   } else {
     /* No shared memory yet. Allocate a new one. */
-    SbiShmem = AllocateAlignedPages (NrEfiPages,
+    SbiShmem = AllocateAlignedRuntimePages (NrEfiPages,
                  EFI_PAGE_SIZE
                  );
 
@@ -370,6 +401,18 @@ SbiMpxyChannelOpen(
     gShmemVirt = SbiShmem;
     gNrShmemPages = NrEfiPages;
   }
+
+  //
+  // Register SetVirtualAddressMap () notify function
+  //
+  Status = gBS->CreateEvent (
+                  EVT_SIGNAL_VIRTUAL_ADDRESS_CHANGE,
+                  TPL_NOTIFY,
+                  DxeRiscVMpxyLibVirtualNotify,
+                  NULL,
+                  &mDxeRiscVMpxyLibVirtualNotifyEvent
+                  );
+  ASSERT_EFI_ERROR (Status);
 
   /* Increase the reference count */
   gShmemRefCount++;
@@ -410,7 +453,7 @@ SbiMpxySendMessage(
   )
 {
   SBI_RET  Ret;
-  UINT64 Phys = gShmemPhysLo;
+  UINT64 Phys = (UINT64) gShmemVirt;
 
   if (!gShmemSet) {
     return EFI_DEVICE_ERROR;
@@ -490,7 +533,7 @@ SbiMpxyLibConstructor (
   // Allocate memory to be shared with OpenSBI for initial MPXY communications
   // untils channels are initialized by their respective drivers.
   //
-  gNonChanTempShmem = AllocateAlignedPages (EFI_SIZE_TO_PAGES(ShmemSize),
+  gNonChanTempShmem = AllocateAlignedRuntimePages (EFI_SIZE_TO_PAGES(ShmemSize),
                         ShmemSize // Align
                         );
 
