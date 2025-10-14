@@ -31,10 +31,14 @@
 #endif
 
 STATIC VOID *gNonChanTempShmem = NULL;
+STATIC VOID *gNonChanTempShmemPhys = NULL;
 STATIC VOID * gShmemVirt = NULL;
+STATIC VOID * gShmemPhys = NULL;
 STATIC UINTN gNrShmemPages = 0;
 STATIC UINT64 gShmemPhysHi = INVAL_PHYS_ADDR;
 STATIC UINT64 gShmemPhysLo = INVAL_PHYS_ADDR;
+STATIC UINT64 OldShmemPhysHi = INVAL_PHYS_ADDR;
+STATIC UINT64 OldShmemPhysLo = INVAL_PHYS_ADDR;
 STATIC UINT64 gShmemSize = 0;
 STATIC UINT64 gShmemSet = 0;
 STATIC BOOLEAN gMpxyLibInitialized = FALSE;
@@ -68,6 +72,7 @@ DxeRiscVMpxyLibVirtualNotify (
   // Convert the channel memory which is of type  EfiRuntimeServicesData to a virtual address.
   //
   gRT->ConvertPointer (0, (VOID **)&gShmemVirt);
+  gRT->ConvertPointer (0, (VOID **)&gNonChanTempShmem);
 }
 
 STATIC
@@ -99,6 +104,7 @@ EFIAPI
 SbiMpxySetShmem(
   IN UINT64 ShmemPhysHi,
   IN UINT64 ShmemPhysLo,
+  IN UINT64 ShmemVirtLo,
   OUT UINT64 *PrevShmemPhysHi,
   OUT UINT64 *PrevShmemPhysLo,
   BOOLEAN ReadBackOldShmem
@@ -133,7 +139,7 @@ SbiMpxySetShmem(
     gShmemPhysHi = ShmemPhysHi;
     gShmemSet = 1;
 
-    PrevMemDet = (UINT64 *)gShmemPhysLo;
+    PrevMemDet = (UINT64 *)ShmemVirtLo;
 
     if (ReadBackOldShmem) {
       *PrevShmemPhysLo = LLE_TO_CPU(PrevMemDet[0]);
@@ -147,16 +153,19 @@ SbiMpxySetShmem(
 STATIC
 EFI_STATUS
 EFIAPI
-SbiMpxyDisableShmem(
+SbiMpxyRestoreShmem(
   VOID
   )
 {
   EFI_STATUS Status;
 
-  if (!gShmemSet)
+  if ((OldShmemPhysHi == INVAL_PHYS_ADDR) &&
+     (OldShmemPhysLo == INVAL_PHYS_ADDR)) {
     return EFI_SUCCESS;
+  }
 
   Status = SbiMpxySetShmem(INVAL_PHYS_ADDR,
+             INVAL_PHYS_ADDR,
              INVAL_PHYS_ADDR,
              NULL,
              NULL,
@@ -172,15 +181,6 @@ SbiMpxyShmemInitialized(
   )
 {
   return (gMpxyLibInitialized);
-}
-
-STATIC
-BOOLEAN
-SbiMpxyShmemIsSet(
-  VOID
-  )
-{
-  return (gShmemSet);
 }
 
 EFI_STATUS
@@ -204,6 +204,7 @@ SbiMpxyGetChannelList(
 
   /* Set the shared memory to memory allocated for non-channel specific reads */
   Status = SbiMpxySetShmem(0,
+             (UINT64)gNonChanTempShmemPhys,
              (UINT64)gNonChanTempShmem,
              &OPhysHi,
              &OPhysLo,
@@ -239,6 +240,7 @@ SbiMpxyGetChannelList(
   /* Switch back to old shared memory */
   Status = SbiMpxySetShmem(OPhysHi,
              OPhysLo,
+             OPhysLo,
              NULL,
              NULL,
              FALSE /* Read back the old address */
@@ -270,6 +272,7 @@ SbiMpxyReadChannelAttrs(
 
   /* Set the shared memory to memory allocated for non-channel specific reads */
   Status = SbiMpxySetShmem(0,
+             (UINT64)gNonChanTempShmemPhys,
              (UINT64)gNonChanTempShmem,
              &OPhysHi,
              &OPhysLo,
@@ -301,6 +304,7 @@ SbiMpxyReadChannelAttrs(
   /* Switch back to old shared memory */
   Status = SbiMpxySetShmem(OPhysHi,
              OPhysLo,
+             OPhysLo,
              NULL,
              NULL,
              FALSE /* Read back the old address */
@@ -319,7 +323,7 @@ SbiMpxyChannelOpen(
   IN UINTN ChannelId
   )
 {
-  UINT32 Attributes[MpxyChanAttrMsgDataMaxLen]; // space to read id and version
+  UINT32 Attributes[3]; // space to read id and version
   UINT32 ChanDataLen;
   VOID *SbiShmem;
   UINTN NrEfiPages;
@@ -346,73 +350,46 @@ SbiMpxyChannelOpen(
    * If shared memory is already set and if this channel's memory requirement
    * is more than the current then reallocate memory.
    */
-  if (SbiMpxyShmemIsSet()) {
-    /* Does this channel needs bigger shared memory? */
-    if (ChanDataLen > gShmemSize) {
-      SbiShmem = AllocateAlignedRuntimePages (NrEfiPages,
-                 EFI_PAGE_SIZE // Align
-                 );
-
-      if (SbiShmem == NULL) {
-        return (EFI_OUT_OF_RESOURCES);
-      }
-
-      /* Set the new shared memory */
-      Status = SbiMpxySetShmem (0,
-                 (UINT64)SbiShmem,
-                 NULL,
-                 NULL,
-                 FALSE /* Not interested in old memory */
-                 );
-
-      if (EFI_ERROR(Status)) {
-        FreeAlignedPages(SbiShmem, NrEfiPages);
-        return (EFI_DEVICE_ERROR);
-      }
-
-      /* Free the previous memory */
-      FreeAlignedPages(gShmemVirt, gNrShmemPages);
-      /* Save the new shared memory */
-      gShmemVirt = SbiShmem;
-      gNrShmemPages = NrEfiPages;
-    }
-  } else {
-    /* No shared memory yet. Allocate a new one. */
-    SbiShmem = AllocateAlignedRuntimePages (NrEfiPages,
-                 EFI_PAGE_SIZE
-                 );
-
+  if (gShmemVirt == NULL) {
+    SbiShmem = AllocateAlignedRuntimePages (NrEfiPages, EFI_PAGE_SIZE);
     if (SbiShmem == NULL) {
       return (EFI_OUT_OF_RESOURCES);
     }
 
+    /* Save the new shared memory */
+    gShmemVirt = SbiShmem;
+    gShmemPhys = SbiShmem;
+    gNrShmemPages = NrEfiPages;
+    /* Set the new shared memory */
     Status = SbiMpxySetShmem (0,
                (UINT64)SbiShmem,
-               NULL,
-               NULL,
-               FALSE
+               (UINT64)SbiShmem,
+               &OldShmemPhysHi,
+               &OldShmemPhysLo,
+               TRUE
                );
 
     if (EFI_ERROR(Status)) {
       FreeAlignedPages(SbiShmem, NrEfiPages);
       return (EFI_DEVICE_ERROR);
     }
-    /* Save the new shared memory */
-    gShmemVirt = SbiShmem;
-    gNrShmemPages = NrEfiPages;
+  } else {
+    SbiShmem = gShmemPhys;
+    /* Set the new shared memory */
+    Status = SbiMpxySetShmem (0,
+               (UINT64)SbiShmem,
+               (UINT64)gShmemVirt,
+               &OldShmemPhysHi,
+               &OldShmemPhysLo,
+               TRUE
+               );
+
+    if (EFI_ERROR(Status)) {
+      /*Don't free */
+      return (EFI_DEVICE_ERROR);
+    }
   }
 
-  //
-  // Register SetVirtualAddressMap () notify function
-  //
-  Status = gBS->CreateEvent (
-                  EVT_SIGNAL_VIRTUAL_ADDRESS_CHANGE,
-                  TPL_NOTIFY,
-                  DxeRiscVMpxyLibVirtualNotify,
-                  NULL,
-                  &mDxeRiscVMpxyLibVirtualNotifyEvent
-                  );
-  ASSERT_EFI_ERROR (Status);
 
   /* Increase the reference count */
   gShmemRefCount++;
@@ -428,14 +405,10 @@ SbiMpxyChannelClose(
 {
   EFI_STATUS Status;
 
-  if (--gShmemRefCount == 0) {
-    /* Ref count is zero. Release the memory */
-    Status = SbiMpxyDisableShmem();
-    if (EFI_ERROR(Status)) {
-      return (EFI_DEVICE_ERROR);
-    }
-
-    FreeAlignedPages(gShmemVirt, gNrShmemPages);
+  /* Ref count is zero. Release the memory */
+  Status = SbiMpxyRestoreShmem();
+  if (EFI_ERROR(Status)) {
+    return (EFI_DEVICE_ERROR);
   }
 
   return (EFI_SUCCESS);
@@ -542,6 +515,19 @@ SbiMpxyLibConstructor (
   if (gNonChanTempShmem == NULL) {
     return (0);
   }
+
+  gNonChanTempShmemPhys = gNonChanTempShmem;
+  //
+  // Register SetVirtualAddressMap () notify function
+  //
+  Status = gBS->CreateEvent (
+                  EVT_SIGNAL_VIRTUAL_ADDRESS_CHANGE,
+                  TPL_NOTIFY,
+                  DxeRiscVMpxyLibVirtualNotify,
+                  NULL,
+                  &mDxeRiscVMpxyLibVirtualNotifyEvent
+                  );
+  ASSERT_EFI_ERROR (Status);
 
   gMpxyLibInitialized = TRUE;
 
