@@ -112,7 +112,7 @@ SbiMpxySetShmem(
 {
   SBI_RET  Ret;
   UINT32 Flags = 0b00;
-  UINT64 *PrevMemDet;
+  UINT64 *PrevMemDet = NULL;
 
   if (ReadBackOldShmem) {
     Flags = 0b01;
@@ -139,9 +139,9 @@ SbiMpxySetShmem(
     gShmemPhysHi = ShmemPhysHi;
     gShmemSet = 1;
 
-    PrevMemDet = (UINT64 *)ShmemVirtLo;
-
     if (ReadBackOldShmem) {
+      ASSERT (ShmemVirtLo != INVAL_PHYS_ADDR);
+      PrevMemDet = (UINT64 *)ShmemVirtLo;
       *PrevShmemPhysLo = LLE_TO_CPU(PrevMemDet[0]);
       *PrevShmemPhysHi = LLE_TO_CPU(PrevMemDet[1]);
     }
@@ -159,13 +159,8 @@ SbiMpxyRestoreShmem(
 {
   EFI_STATUS Status;
 
-  if ((OldShmemPhysHi == INVAL_PHYS_ADDR) &&
-     (OldShmemPhysLo == INVAL_PHYS_ADDR)) {
-    return EFI_SUCCESS;
-  }
-
-  Status = SbiMpxySetShmem(INVAL_PHYS_ADDR,
-             INVAL_PHYS_ADDR,
+  Status = SbiMpxySetShmem(OldShmemPhysHi,
+             OldShmemPhysLo,
              INVAL_PHYS_ADDR,
              NULL,
              NULL,
